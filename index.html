@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#171717">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg">
+<title>Piano 6</title>
+<style>
+:root{color-scheme:dark;--bg:#171717;--panel:#222;--white:#f8f6ef;--black:#171717;--accent:#b9a1ff;--white-w:42px;--key-h:245px;--black-w:26px;--black-h:150px}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#fff;font:15px system-ui,-apple-system,sans-serif;overscroll-behavior:none}
+header{padding:14px 14px 9px;display:flex;align-items:center;justify-content:space-between;gap:12px}h1{font-size:22px;margin:0}small{color:#aaa}
+.controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:0 12px 12px}
+button,select{background:#333;color:#fff;border:1px solid #555;border-radius:10px;padding:9px 11px;font:inherit;touch-action:manipulation}
+button:active{background:#51456d}button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.scroll{overflow-x:auto;overflow-y:hidden;padding:0 8px 12px;touch-action:pan-x;scrollbar-color:#555 #222;-webkit-overflow-scrolling:touch}
+.keyboard{position:relative;height:var(--key-h);width:max-content;display:flex;user-select:none;-webkit-user-select:none;touch-action:pan-x}
+.white{position:relative;width:var(--white-w);height:var(--key-h);background:var(--white);border:1px solid #888;border-radius:0 0 5px 5px;z-index:1;color:#444;display:flex;align-items:flex-end;justify-content:center;padding-bottom:9px;font-size:11px;flex-shrink:0;touch-action:pan-x}
+.white.down{background:#d5c9ff}.black{position:absolute;top:0;width:var(--black-w);height:var(--black-h);background:linear-gradient(#333,#080808);border:1px solid #000;border-radius:0 0 4px 4px;z-index:3;transform:translateX(-50%);box-shadow:0 3px 3px #0008;color:#ddd;display:flex;align-items:flex-end;justify-content:center;padding-bottom:7px;font-size:9px;touch-action:pan-x}
+.black.down{background:linear-gradient(#8f7acb,#4b3c77)}#status{color:var(--accent);font-size:12px}
+</style>
+</head>
+<body>
+<header><div><h1>🎹 Piano 6</h1><small>6 octavas · Do2 a Si7</small></div><span id="status">Audio listo</span></header>
+<div class="controls">
+<button id="install" hidden>Instalar app</button>
+<button id="sound">Activar sonido</button>
+<label>Volumen <input id="volume" type="range" min="0" max="100" value="65" aria-label="Volumen"></label>
+<button id="smaller" aria-label="Hacer teclas más pequeñas">− Teclas</button>
+<button id="larger" aria-label="Hacer teclas más grandes">＋ Teclas</button>
+<button id="center">Centrar</button>
+</div>
+<div class="scroll" id="scroller"><div class="keyboard" id="keyboard" aria-label="Piano de seis octavas"></div></div>
+<script>
+(() => {
+ const keyEl=document.getElementById('keyboard'), scroller=document.getElementById('scroller');
+ const names=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+ const blackSet=new Set([1,3,6,8,10]);
+ let audio=null, master=null, whiteW=42, keyH=245;
+ const voices=new Map(), pointerNotes=new Map();
+ const label=n=>names[n%12]+(Math.floor(n/12)-1);
+ const start=36,end=108; // Do2 through Si7: six octaves
+ const whites=[];
+ for(let midi=start;midi<end;midi++){
+   if(!blackSet.has(midi%12)){
+     const el=document.createElement('div');el.className='white';el.dataset.midi=midi;
+     el.innerHTML='<span>'+label(midi)+'</span>';keyEl.appendChild(el);whites.push(midi);
+   }
+ }
+ for(let midi=start;midi<end;midi++){
+   if(!blackSet.has(midi%12))continue;
+   const prior=whites.filter(w=>w<midi).length;
+   const el=document.createElement('div');el.className='black';el.dataset.midi=midi;
+   el.style.left=(prior*whiteW)+'px';el.innerHTML='<span>'+label(midi)+'</span>';keyEl.appendChild(el);
+ }
+ function applySize(){
+   const blackW=Math.round(whiteW*.62), blackH=Math.round(keyH*.61);
+   document.documentElement.style.setProperty('--white-w',whiteW+'px');
+   document.documentElement.style.setProperty('--key-h',keyH+'px');
+   document.documentElement.style.setProperty('--black-w',blackW+'px');
+   document.documentElement.style.setProperty('--black-h',blackH+'px');
+   keyEl.style.width=(whites.length*whiteW)+'px';
+   keyEl.querySelectorAll('.black').forEach(el=>{
+     const midi=Number(el.dataset.midi),prior=whites.filter(w=>w<midi).length;
+     el.style.left=(prior*whiteW)+'px';
+   });
+ }
+ applySize();
+ async function init(){
+   if(!audio){const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return;audio=new AC();master=audio.createGain();master.gain.value=Number(document.getElementById('volume').value)/100;master.connect(audio.destination);}
+   if(audio.state==='suspended')await audio.resume();document.getElementById('status').textContent='Audio activo';
+ }
+ document.getElementById('sound').addEventListener('click',init);
+ document.getElementById('volume').addEventListener('input',e=>{if(master)master.gain.setTargetAtTime(Number(e.target.value)/100,audio.currentTime,.02)});
+ function noteOn(el,pointerId){
+   const midi=Number(el.dataset.midi);if(pointerNotes.has(pointerId))noteOff(pointerId);
+   pointerNotes.set(pointerId,midi);
+   let voice=voices.get(midi);
+   if(voice){voice.pointers.add(pointerId);return;}
+   init();if(!audio)return;
+   const now=audio.currentTime,f=440*Math.pow(2,(midi-69)/12),g=audio.createGain();
+   g.gain.setValueAtTime(.0001,now);g.gain.exponentialRampToValueAtTime(.38,now+.012);g.gain.exponentialRampToValueAtTime(.14,now+.18);
+   const oscs=[];
+   [[1,1],[2,.32],[3,.12],[4,.055],[5,.025]].forEach(([harm,amp])=>{const o=audio.createOscillator(),og=audio.createGain();o.type='sine';o.frequency.value=f*harm;og.gain.value=amp;o.connect(og);og.connect(g);o.start(now);oscs.push(o)});
+   g.connect(master);voices.set(midi,{g,oscs,pointers:new Set([pointerId]),el});el.classList.add('down');
+ }
+ function releaseVoice(midi){
+   const voice=voices.get(midi);if(!voice)return;
+   const now=audio.currentTime;voice.g.gain.cancelScheduledValues(now);voice.g.gain.setTargetAtTime(.0001,now,.1);
+   voice.oscs.forEach(o=>{try{o.stop(now+.55)}catch(_){}});voice.el.classList.remove('down');voices.delete(midi);
+ }
+ function noteOff(pointerId){
+   const midi=pointerNotes.get(pointerId);if(midi===undefined)return;
+   pointerNotes.delete(pointerId);const voice=voices.get(midi);if(!voice)return;
+   voice.pointers.delete(pointerId);if(voice.pointers.size===0)releaseVoice(midi);
+ }
+ function releaseAll(){[...pointerNotes.keys()].forEach(noteOff)}
+ // No per-key pointer capture: it was interfering with multi-touch and horizontal scrolling.
+ keyEl.addEventListener('pointerdown',e=>{
+   const el=e.target.closest('[data-midi]');if(!el)return;e.preventDefault();
+   noteOn(el,e.pointerId);
+ });
+ document.addEventListener('pointerup',e=>noteOff(e.pointerId));
+ document.addEventListener('pointercancel',e=>noteOff(e.pointerId));
+ window.addEventListener('blur',releaseAll);document.addEventListener('visibilitychange',()=>{if(document.hidden)releaseAll()});
+ // Allow finger glissando across keys without leaving a stuck note.
+ document.addEventListener('pointermove',e=>{
+   if(!pointerNotes.has(e.pointerId)||e.buttons===0)return;
+   const el=document.elementFromPoint(e.clientX,e.clientY)?.closest?.('[data-midi]');
+   if(el&&Number(el.dataset.midi)!==pointerNotes.get(e.pointerId))noteOn(el,e.pointerId);
+ },{passive:true});
+ document.getElementById('smaller').addEventListener('click',()=>{whiteW=Math.max(30,whiteW-4);keyH=Math.round(whiteW*5.83);applySize()});
+ document.getElementById('larger').addEventListener('click',()=>{whiteW=Math.min(54,whiteW+4);keyH=Math.round(whiteW*5.83);applySize()});
+ document.getElementById('center').addEventListener('click',()=>scroller.scrollTo({left:(keyEl.scrollWidth-scroller.clientWidth)/2,behavior:'smooth'}));
+ let installPrompt;window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;document.getElementById('install').hidden=false});
+ document.getElementById('install').addEventListener('click',async()=>{if(!installPrompt)return;installPrompt.prompt();await installPrompt.userChoice;installPrompt=null});
+ if('serviceWorker'in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));
+})();
+</script>
+</body></html>
